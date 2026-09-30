@@ -1,0 +1,27 @@
+# Entorno virtual y Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# Resultados experimentales y datos masivos generados
+results/*.json
+results/*.csv
+results/*.parquet
+!results/.gitkeep
+
+# Logs y trazas de depuración
+*.log
+.pytest_cache/
+
+# DuckDB / SQLite temporales
+*.duckdb
+*.duckdb.tmp
+*.db
+
+# Configuración de IDEs
+.vscode/
+.idea/
