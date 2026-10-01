@@ -3,7 +3,6 @@ import time
 from typing import Any, Optional
 from confluent_kafka import Consumer, KafkaError
 from consumer.arrow_transformer import ArrowTransformer
-from consumer.iceberg_sink import IcebergLakehouseSink
 from consumer.metrics_tracker import MetricsTracker
 
 
@@ -18,8 +17,10 @@ class KafkaStreamConsumer:
         flush_interval_sec: float = 10.0,
         metrics_output: str = "metricas_experimento.csv",
         stop_event: Optional[Any] = None,
+        entity_type: str = "trolebuses",
         ):
         self.topic = topic
+        self.entity_type = entity_type
         self.buffer_size = buffer_size
         self.flush_interval_sec = flush_interval_sec
         self.stop_event = stop_event
@@ -48,7 +49,7 @@ class KafkaStreamConsumer:
 
         # Fase 1: Transformación PyArrow
         t0_trans = time.perf_counter()
-        arrow_table, raw_bytes = self.transformer.transform(raw_buffer)
+        arrow_table, raw_bytes = self.transformer.transform(raw_buffer, entity_type=self.entity_type)
         t_trans_ms = (time.perf_counter() - t0_trans) * 1000
 
         print(f"\n[DEBUG CONSUMER] raw_buffer len: {len(raw_buffer)}")

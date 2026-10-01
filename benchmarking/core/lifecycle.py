@@ -2,7 +2,7 @@
 
 import socket
 import time
-from typing import Any
+from typing import Any, Optional
 import pyarrow.fs as pafs
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
@@ -29,7 +29,7 @@ class LakehouseLifecycleManager:
         s3_access_key: str = "admin",
         s3_secret_key: str = "password123",
         warehouse_name: str = "lakehouse",
-        ):
+    ):
         self.catalog_uri = catalog_uri
         self.s3_endpoint = s3_endpoint
         self.warehouse_name = warehouse_name
@@ -53,7 +53,7 @@ class LakehouseLifecycleManager:
 
     def verify_service_health(
         self, host: str, port: int, timeout_sec: float = 3.0
-        ) -> bool:
+    ) -> bool:
         """Verifica si un socket TCP responde en el host y puerto especificados."""
         try:
             with socket.create_connection((host, port), timeout=timeout_sec):
@@ -62,12 +62,12 @@ class LakehouseLifecycleManager:
             return False
 
     def verify_environment(self) -> bool:
-        """Comprueba la disponibilidad de MinIO S3, REST Catalog y PostgreSQL."""
+        """Comprueba la disponibilidad de MinIO S3, REST Catalog y Kafka Broker."""
         services = [
             ("MinIO S3", "localhost", 9000),
             ("Iceberg REST Catalog", "localhost", 8181),
             ("Kafka Broker", "100.111.214.11", 9092),
-            ]
+        ]
         all_ok = True
         for name, host, port in services:
             status = self.verify_service_health(host, port)
@@ -78,7 +78,7 @@ class LakehouseLifecycleManager:
         return all_ok
 
     @staticmethod
-    def get_silver_schema() -> Schema:
+    def get_trolebuses_schema() -> Schema:
         """Retorna la especificación formal del esquema tipado para telemetría vehicular."""
         return Schema(
             NestedField(
@@ -139,11 +139,64 @@ class LakehouseLifecycleManager:
                 required=True,
             ),
             NestedField(
-                field_id=11, name="es_sintetico", field_type=BooleanType(), required=True
+                field_id=11,
+                name="es_sintetico",
+                field_type=BooleanType(),
+                required=True,
             ),
         )
 
-    def reset_table(self, namespace: str, table_name: str) -> None:
+    # Alias de compatibilidad hacia atrás
+    get_silver_schema = get_trolebuses_schema
+
+    @staticmethod
+    def get_estaciones_schema() -> Schema:
+        """Retorna la especificación formal del esquema tipado para infraestructura (estaciones)."""
+        return Schema(
+            NestedField(
+                field_id=1, name="step", field_type=LongType(), required=True
+            ),
+            NestedField(
+                field_id=2, name="parada_id", field_type=StringType(), required=True
+            ),
+            NestedField(
+                field_id=3,
+                name="nombre_parada",
+                field_type=StringType(),
+                required=False,
+            ),
+            NestedField(
+                field_id=4,
+                name="personas_esperando",
+                field_type=IntegerType(),
+                required=True,
+            ),
+            NestedField(
+                field_id=5,
+                name="event_time",
+                field_type=TimestampType(),
+                required=False,
+            ),
+            NestedField(
+                field_id=6,
+                name="ingest_time",
+                field_type=TimestampType(),
+                required=True,
+            ),
+            NestedField(
+                field_id=7,
+                name="es_sintetico",
+                field_type=BooleanType(),
+                required=True,
+            ),
+        )
+
+    def reset_table(
+        self,
+        namespace: str,
+        table_name: str,
+        schema: Optional[Schema] = None,
+    ) -> None:
         """Ejecuta un DROP TABLE PURGE para borrar datos y metadatos, y recrea la tabla vacía."""
         if self.catalog is None:
             self.connect()
@@ -157,29 +210,32 @@ class LakehouseLifecycleManager:
 
         table_identifier = f"{namespace}.{table_name}"
 
-        # 2. Purgar tabla previa si existe (elimina metadatos y archivos físicos en MinIO)
+        # 2. Purgar tabla previa si existe
         try:
-            # PyIceberg utiliza 'purge_requested' en RestCatalog
             try:
                 self.catalog.purge_table(table_identifier)
             except TypeError:
-                # Fallback por si la versión instalada de PyIceberg solo acepta el identificador posicional
                 self.catalog.drop_table(table_identifier)
 
             print(f"[Lifecycle] Tabla '{table_identifier}' purgada exitosamente.")
         except NoSuchTableError:
             print(f"[Lifecycle] Tabla '{table_identifier}' no existía previamente.")
 
-        # Margen breve para estabilización de S3 / PostgreSQL
         time.sleep(0.5)
 
-        # 3. Recrear con el esquema oficial
-        schema = self.get_silver_schema()
+        # 3. Determinar esquema por defecto según el nombre de la tabla
+        target_schema = schema
+        if target_schema is None:
+            if "estacion" in table_name:
+                target_schema = self.get_estaciones_schema()
+            else:
+                target_schema = self.get_trolebuses_schema()
+
         self.catalog.create_table(
-                identifier=table_identifier,
-                schema=schema,
-                properties=self.catalog_properties,
-            )
+            identifier=table_identifier,
+            schema=target_schema,
+            properties=self.catalog_properties,
+        )
         print(f"[Lifecycle] Tabla '{table_identifier}' recreada en estado limpio.")
 
     def reset_raw_directory(
@@ -212,7 +268,7 @@ class LakehouseLifecycleManager:
         except Exception:
             pass
 
-        # 2. Purgar contenido si el directorio/prefijo ya existe
+        # 2. Purgar contenido recursivamente
         try:
             file_info = fs.get_file_info(target)
             if file_info.type != pafs.FileType.NotFound:
@@ -222,9 +278,28 @@ class LakehouseLifecycleManager:
                 fs.create_dir(target)
                 print(f"[Lifecycle] Directorio crudo '{target}' inicializado en estado limpio.")
         except Exception as e:
-            # Fallback seguro para MinIO: recrear el prefijo limpio
             try:
                 fs.create_dir(target)
                 print(f"[Lifecycle] Directorio crudo '{target}' preparado.")
             except Exception:
                 print(f"[Lifecycle Warning] No se pudo purgar '{target}': {e}")
+
+    def reset_for_treatment(self, treatment: Any) -> None:
+        """Punto de entrada orquestador para resetear el entorno según el tratamiento."""
+        if treatment.sink_type == "raw":
+            # Purgar el prefijo raíz limpia tanto trolebuses como estaciones y subdirectorios date=*
+            raw_base = getattr(treatment, "raw_base_prefix", "raw_parquet/zacatenco")
+            raw_bucket = getattr(treatment, "raw_bucket", "telemetria-lake")
+            self.reset_raw_directory(bucket_name=raw_bucket, base_path=raw_base)
+        else:
+            # En Iceberg recreamos ambas tablas en estado vacío
+            self.reset_table(
+                namespace=treatment.namespace,
+                table_name=treatment.table_trolebuses,
+                schema=self.get_trolebuses_schema(),
+            )
+            self.reset_table(
+                namespace=treatment.namespace,
+                table_name=treatment.table_estaciones,
+                schema=self.get_estaciones_schema(),
+            )
