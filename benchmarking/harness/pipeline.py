@@ -16,7 +16,8 @@ from consumer.main_consumer import run_consumer_loop
 from benchmarking.config.treatment import TreatmentConfig, SinkType
 
 
-def _worker_process_target(    topic: str,
+def _worker_process_target(    
+    topic: str,
     entity_type: str,
     table_name: str,
     raw_path: str,
@@ -25,6 +26,7 @@ def _worker_process_target(    topic: str,
     metrics_csv_path: str,
     sink_type: SinkType,
     stop_event: EventType,
+    kafka_group_id: str,
 ):
     """Punto de entrada aislado para el worker de consumo."""
     run_consumer_loop(
@@ -37,12 +39,12 @@ def _worker_process_target(    topic: str,
           metrics_csv_path=metrics_csv_path,
           sink_type=sink_type,
           stop_event=stop_event,
+          group_id=kafka_group_id
       )
     
 
 class PipelineHarness:
     """Administra el proceso de ingesta continua en segundo plano."""
-
     def __init__(self, drain_timeout_sec: float = 15.0):
         self.drain_timeout_sec = drain_timeout_sec
         self._proc_trolebuses: Optional[mp.Process] = None
@@ -70,6 +72,9 @@ class PipelineHarness:
             f"{treatment.results_dir}/ingest_{treatment.run_id}_estaciones.csv"
         )
 
+        # Construcción de group.id de Kafka aislado por tratamiento y entidad para evitar interferencias
+        kafka_group_id = f"{treatment.run_id}"
+
         # 1. Proceso Consumidor Trolebuses
         self._proc_trolebuses = mp.Process(
             target=_worker_process_target,
@@ -83,6 +88,7 @@ class PipelineHarness:
                 "metrics_csv_path": csv_trolebuses,
                 "sink_type": treatment.sink_type,
                 "stop_event": self._stop_event,
+                "kafka_group_id": kafka_group_id,
             },
             daemon=True,
         )
@@ -100,6 +106,7 @@ class PipelineHarness:
                 "metrics_csv_path": csv_estaciones,
                 "sink_type": treatment.sink_type,
                 "stop_event": self._stop_event,
+                "kafka_group_id": kafka_group_id,
             },
             daemon=True,
         )

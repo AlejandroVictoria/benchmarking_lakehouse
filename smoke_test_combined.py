@@ -126,30 +126,34 @@ def run_treatment_smoke(sink_type: SinkType, replica_id: int = 99) -> bool:
 
 
 def run_dual_smoke_test():
-  print("############################################################")
-  print("##     SUITE DE VALIDACIÓN DUAL STREAM: RAW vs. ICEBERG   ##")
-  print("##            (Trolebuses + Estaciones + GTFS)            ##")
-  print("############################################################")
+    print("############################################################")
+    print("##     SUITE DE VALIDACIÓN DUAL STREAM: RAW vs. ICEBERG   ##")
+    print("##            (Trolebuses + Estaciones + GTFS)            ##")
+    print("############################################################")
 
-  # Test 1: Data Lake crudo (Particionado Hive por fecha)
-  ok_raw = run_treatment_smoke(sink_type="raw", replica_id=98)
-  if not ok_raw:
-    print("[!] Falló la prueba en modo RAW. Abortando suite.")
-    return
+    print(f"[Lifecycle]: Iniciando validación dual stream con réplica 98 (RAW) y 99 (ICEBERG)...")
+    print(f"[LIfecycle]: Borrando y reinicializando tópicos de kafka para ejecución limpia...")
+    LakehouseLifecycleManager().ensure_clean_kafka_topics()
+    
+    # Test 1: Data Lake crudo (Particionado Hive por fecha)
+    ok_raw = run_treatment_smoke(sink_type="raw", replica_id=98)
+    if not ok_raw:
+        print("[!] Falló la prueba en modo RAW. Abortando suite.")
+        return
 
-  time.sleep(2.0)
+    time.sleep(2.0)
 
-  # Test 2: Lakehouse transaccional (Apache Iceberg)
-  ok_iceberg = run_treatment_smoke(sink_type="iceberg", replica_id=99)
-  if not ok_iceberg:
-    print("[!] Falló la prueba en modo ICEBERG.")
-    return
+    # Test 2: Lakehouse transaccional (Apache Iceberg)
+    ok_iceberg = run_treatment_smoke(sink_type="iceberg", replica_id=99)
+    if not ok_iceberg:
+        print("[!] Falló la prueba en modo ICEBERG.")
+        return
 
-  print("\n============================================================")
-  print("[✓✓] SMOKE TEST DUAL STREAM COMPLETADO CON ÉXITO")
-  print("      Ambos flujos (vehicular y andenes) persisten y")
-  print("      responden a las consultas relacionales y dimensionales.")
-  print("============================================================")
+    print("\n============================================================")
+    print("[✓✓] SMOKE TEST DUAL STREAM COMPLETADO CON ÉXITO")
+    print("      Ambos flujos (vehicular y andenes) persisten y")
+    print("      responden a las consultas relacionales y dimensionales.")
+    print("============================================================")
 
 
 if __name__ == "__main__":

@@ -29,8 +29,13 @@ def run_consumer_loop(
     kafka_topic = topic or os.getenv("KAFKA_TOPIC", "telemetria.trolebuses")
     
     # Grupos aislados por entidad para evitar interferencias
-    consumer_group = group_id or f"lakehouse-sink-{entity_type}"
-    
+    if group_id is None:
+        consumer_group = f"lakehouse-sink-{entity_type}"
+    else:
+        consumer_group = f"harness_{group_id}_{entity_type}"
+
+    print(f"[Consumer Loop] Iniciando consumidor Kafka para tópico '{kafka_topic}'"
+          f" con group.id='{consumer_group}' y sink={sink_type}...")
     # Construcción dinámica del sink según la entidad/ruta
     sink = get_lakehouse_sink(
         sink_type=sink_type,

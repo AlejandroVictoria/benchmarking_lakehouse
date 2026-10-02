@@ -177,7 +177,7 @@ class DuckDBQueryRunner:
             FROM {src_trolebuses} t
             INNER JOIN {src_estaciones} e 
                 ON t.step = e.step 
-                AND t.proxima_estacion = e.nombre_parada
+                AND TRIM(t.proxima_estacion) = TRIM(e.nombre_parada)
             WHERE t.es_sintetico = false
             ORDER BY t.step ASC, t.trolebus_id ASC;
         """
@@ -198,9 +198,9 @@ class DuckDBQueryRunner:
             FROM {src_trolebuses} t
             INNER JOIN {src_estaciones} e 
                 ON t.step = e.step 
-                AND t.proxima_estacion = e.nombre_parada
+                AND TRIM(t.proxima_estacion) = TRIM(e.nombre_parada)
             LEFT JOIN read_parquet('{gtfs_parquet_path}') g
-                ON e.parada_id = g.parada_id
+                ON TRIM(e.parada_id) = TRIM(g.parada_id)
             WHERE t.step % 10 = 0
             ORDER BY t.step ASC;
         """

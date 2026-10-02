@@ -2,11 +2,13 @@
 
 import socket
 import time
-from typing import Any, Optional
+from typing import Any, Optional, List
 import pyarrow.fs as pafs
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
 from pyiceberg.schema import Schema
+from confluent_kafka.admin import AdminClient
+from confluent_kafka.cimpl import NewTopic
 from pyiceberg.types import (
     BooleanType,
     DoubleType,
@@ -21,7 +23,6 @@ from pyiceberg.types import (
 
 class LakehouseLifecycleManager:
     """Administra la verificación de salud, purga y recreación de tablas en el Lakehouse."""
-
     def __init__(
         self,
         catalog_uri: str = "http://localhost:8181",
@@ -29,6 +30,8 @@ class LakehouseLifecycleManager:
         s3_access_key: str = "admin",
         s3_secret_key: str = "password123",
         warehouse_name: str = "lakehouse",
+        kafka_bootstrap_server: str = "100.111.214.11:9092",
+        topics_to_manage: Optional[List[str]] = None
     ):
         self.catalog_uri = catalog_uri
         self.s3_endpoint = s3_endpoint
@@ -44,6 +47,82 @@ class LakehouseLifecycleManager:
             "s3.path-style-access": "true",
         }
         self.catalog = None
+
+        self.kafka_server = kafka_bootstrap_server
+        self.topics_to_manage = topics_to_manage or [
+            "telemetria.trolebuses",
+            "telemetria.estaciones",
+        ]
+
+    def ensure_clean_kafka_topics(
+        self, timeout_sec: float = 15.0, num_partitions: int = 1
+    ) -> None:
+        """Purga y recrea los tópicos al arrancar la sesión, esperando confirmación activa del broker."""
+        admin = AdminClient({"bootstrap.servers": self.kafka_server})
+
+        # 1. Comprobar existencia previa y borrar si es necesario
+        meta = admin.list_topics(timeout=timeout_sec)
+        existing = set(meta.topics.keys())
+        to_delete = [t for t in self.topics_to_manage if t in existing]
+
+        if to_delete:
+            print(
+                f"[Lifecycle] Purgando tópicos existentes al inicio de suite: {to_delete}..."
+            )
+            fs_del = admin.delete_topics(to_delete, operation_timeout=timeout_sec)
+
+            for topic, future in fs_del.items():
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[Lifecycle] Aviso en borrado de {topic}: {e}")
+
+        # 2. Recrear tópicos limpios
+        new_topics = [
+            NewTopic(
+                topic=t,
+                num_partitions=num_partitions,
+                replication_factor=1,
+                config={"retention.ms": "86400000"},  # 24h retención automática
+            )
+            for t in self.topics_to_manage
+        ]
+
+        fs_create = admin.create_topics(new_topics, operation_timeout=timeout_sec)
+        for topic, future in fs_create.items():
+            try:
+                future.result()
+            except Exception as e:
+                print(f"[Lifecycle] Aviso en creación de {topic}: {e}")  # Si el broker ya lo creó por autoconfiguración, continuar
+
+        # 3. Validación activa: Bloquear hasta que el broker reporte particiones con líder asignado
+        t_inicio = time.time()
+        print("[Lifecycle] Esperando validación activa de tópicos en el cluster...")
+        while time.time() - t_inicio < timeout_sec:
+            meta = admin.list_topics(timeout=2.0)
+            listos = 0
+            for t_name in self.topics_to_manage:
+                topic_meta = meta.topics.get(t_name)
+                if (
+                    topic_meta
+                    and not topic_meta.error
+                    and len(topic_meta.partitions) >= num_partitions
+                ):
+                    # Validar que la partición tenga líder electo (leader != -1)
+                    part = topic_meta.partitions.get(0)
+                    if part and part.leader != -1:
+                        listos += 1
+
+            if listos == len(self.topics_to_manage):
+                print(f"[Lifecycle] ✓ Tópicos {self.topics_to_manage} listos y validados.")
+            return
+
+            time.sleep(0.5)
+
+        raise TimeoutError(
+            "[Lifecycle Error] No se pudo verificar la disponibilidad de los tópicos en Kafka."
+        )
+
 
     def connect(self) -> None:
         """Inicializa la conexión con el catálogo REST."""
@@ -231,10 +310,15 @@ class LakehouseLifecycleManager:
             else:
                 target_schema = self.get_trolebuses_schema()
 
+        table_properties = {
+            "write.format.default": "parquet",
+            "write.parquet.compression-codec": "zstd"
+        }
+
         self.catalog.create_table(
             identifier=table_identifier,
             schema=target_schema,
-            properties=self.catalog_properties,
+            properties=table_properties,
         )
         print(f"[Lifecycle] Tabla '{table_identifier}' recreada en estado limpio.")
 
@@ -303,3 +387,8 @@ class LakehouseLifecycleManager:
                 table_name=treatment.table_estaciones,
                 schema=self.get_estaciones_schema(),
             )
+            t_trole = self.catalog.load_table(f"{treatment.namespace}.{treatment.table_trolebuses}")
+            t_estac = self.catalog.load_table(f"{treatment.namespace}.{treatment.table_estaciones}")
+            assert len(t_trole.snapshots()) == 0, ("Lifecycle] ERROR: La tabla trolebuses no está vacía tras reset.")
+            assert len(t_estac.snapshots()) == 0, ("Lifecycle] ERROR: La tabla estaciones no está vacía tras reset.")
+        print(f"[Lifecycle] Entorno reseteado para tratamiento '{treatment.run_id}' con sink '{treatment.sink_type}'.")
