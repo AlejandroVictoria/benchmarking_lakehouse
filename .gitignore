@@ -8,10 +8,12 @@ env/
 .env
 
 # Resultados experimentales y datos masivos generados
+results/
 results/*.json
 results/*.csv
 results/*.parquet
 !results/.gitkeep
+ablation_study/results/*
 
 # Logs y trazas de depuración
 *.log

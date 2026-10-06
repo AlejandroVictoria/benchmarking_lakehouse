@@ -66,10 +66,10 @@ class PipelineHarness:
         metrics_dir = Path(treatment.results_dir)
         metrics_dir.mkdir(parents=True, exist_ok=True)
         csv_trolebuses = (
-            f"{treatment.results_dir}/ingest_{treatment.run_id}_trolebuses.csv"
+            f"{treatment.metrics_csv_path}_trolebuses.csv"
         )
         csv_estaciones = (
-            f"{treatment.results_dir}/ingest_{treatment.run_id}_estaciones.csv"
+            f"{treatment.metrics_csv_path}_estaciones.csv"
         )
 
         # Construcción de group.id de Kafka aislado por tratamiento y entidad para evitar interferencias

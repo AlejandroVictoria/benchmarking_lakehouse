@@ -84,10 +84,12 @@ class TreatmentConfig:
     def metrics_csv_path(self) -> str:
         """Ruta al archivo CSV consolidado de telemetría de ingesta."""
         Path(self.results_dir).mkdir(parents=True, exist_ok=True)
-        return f"{self.results_dir}/ingest_{self.run_id}.csv"
+        Path(f"{self.results_dir}/ingest").mkdir(parents=True, exist_ok=True)
+        return f"{self.results_dir}/ingest/ingest_{self.run_id}"
 
     @property
     def evaluation_json_path(self) -> str:
         """Ruta al archivo JSON con las métricas de lectura y auditoría."""
         Path(self.results_dir).mkdir(parents=True, exist_ok=True)
-        return f"{self.results_dir}/eval_{self.run_id}.json"
+        Path(f"{self.results_dir}/eval").mkdir(parents=True, exist_ok=True)
+        return f"{self.results_dir}/eval/eval_{self.run_id}.json"
