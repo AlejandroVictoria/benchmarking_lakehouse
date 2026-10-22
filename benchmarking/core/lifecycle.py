@@ -277,11 +277,14 @@ class LakehouseLifecycleManager:
         schema: Optional[Schema] = None,
     ) -> None:
         """Ejecuta un DROP TABLE PURGE para borrar datos y metadatos, y recrea la tabla vacía."""
+        # print(f"[Debug] Reset de tabla: {namespace}.{table_name} con esquema: {schema}")
         if self.catalog is None:
+            # print("[Debug] Conectando al catálogo REST...")
             self.connect()
         assert self.catalog is not None
 
         # 1. Asegurar namespace
+        # print(f"[Debug] Asegurando namespace '{namespace}'...")
         try:
             self.catalog.create_namespace(namespace)
         except NamespaceAlreadyExistsError:
@@ -290,6 +293,7 @@ class LakehouseLifecycleManager:
         table_identifier = f"{namespace}.{table_name}"
 
         # 2. Purgar tabla previa si existe
+        # print(f"[Debug] Intentando purgar tabla '{table_identifier}' si existe...")
         try:
             try:
                 self.catalog.purge_table(table_identifier)
@@ -377,16 +381,21 @@ class LakehouseLifecycleManager:
             self.reset_raw_directory(bucket_name=raw_bucket, base_path=raw_base)
         else:
             # En Iceberg recreamos ambas tablas en estado vacío
+            # print(f"[Lifecycle] Reset de tablas Iceberg para tratamiento '{treatment.run_id}' con sink '{treatment.sink_type}'...")
             self.reset_table(
                 namespace=treatment.namespace,
                 table_name=treatment.table_trolebuses,
                 schema=self.get_trolebuses_schema(),
             )
+            # print(f"[Lifecycle] Tabla '{treatment.namespace}.{treatment.table_trolebuses}' reseteada.")
             self.reset_table(
                 namespace=treatment.namespace,
                 table_name=treatment.table_estaciones,
                 schema=self.get_estaciones_schema(),
             )
+            # print(f"[Lifecycle] Tabla '{treatment.namespace}.{treatment.table_estaciones}' reseteada.")
+            # print(f"[Lifecycle] Validando que las tablas Iceberg estén vacías tras reset...")
+
             t_trole = self.catalog.load_table(f"{treatment.namespace}.{treatment.table_trolebuses}")
             t_estac = self.catalog.load_table(f"{treatment.namespace}.{treatment.table_estaciones}")
             assert len(t_trole.snapshots()) == 0, ("Lifecycle] ERROR: La tabla trolebuses no está vacía tras reset.")

@@ -9,15 +9,17 @@ from consumer.sink_factory import SinkType
 
 def build_ablation_matrix(
     replicas: int = 5,
-    sim_steps: int = 600,
+    sim_steps: int = 1200,
 ) -> List[TreatmentConfig]:
-  """Construye las 90 combinaciones del diseño experimental factorial."""
+  """Construye las 300 combinaciones del diseño experimental factorial."""
   sinks: List[SinkType] = ["raw", "iceberg"]
-  k_factors = [1, 5, 10]
+  k_factors = [1, 5, 10, 20, 50, 100]  # Ajuste de carga nominal y máxima para el estudio de ablación
   buffer_profiles = [
       (1, 0.0),  # Streaming puro
       (50, 2.0),  # Microbatch intermedio
       (200, 5.0),  # Microbatch estándar
+      (1000000, 2.0),
+      (1000000, 5.0),
   ]
 
   matrix: List[TreatmentConfig] = []
@@ -36,68 +38,58 @@ def build_ablation_matrix(
               table_trolebuses="telemetria_trolebuses",
               table_estaciones="telemetria_estaciones",
               sink_type=sink,
-              tag="ablation",
+              tag="ablation_2",
           )
           matrix.append(treatment)
 
   return matrix
 
-def build_validation_matrix(sim_steps: int = 600) -> List[TreatmentConfig]:
-  k_factors = [1, 5, 10]
-  buffer_profiles = [
-      (1, 0.0),  # Streaming puro
-      (50, 2.0),  # Microbatch intermedio
-      (200, 5.0),  # Microbatch estándar
-  ]
+def build_validation_matrix(sim_steps: int = 1200) -> List[TreatmentConfig]:
+    k_factors = [1, 5, 10, 20, 50, 100]  # Ajuste de carga nominal y máxima
+    buffer_profiles = [
+        (1, 0.0),  # Streaming puro
+        (50, 2.0),  # Microbatch intermedio
+        (200, 5.0),  # Microbatch estándar
+        (1000000, 2.0),
+        (1000000, 5.0),
+    ]
 
-  # 1. Definición explícita de los 4 tratamientos de validación
-  validation_specs = [
-      # Tratamiento 1: Raw en carga nominal con batch grande
-      {
-          "sink": "raw",
-          "k": k_factors[0],
-          "buf": buffer_profiles[2][0],
-          "flush": buffer_profiles[2][1],
-      },
-      # Tratamiento 2: Raw bajo máxima carga con streaming inmediato (estrés de small files)
-      {
-          "sink": "raw",
-          "k": k_factors[2],
-          "buf": buffer_profiles[0][0],
-          "flush": buffer_profiles[0][1],
-      },
-      # Tratamiento 3: Iceberg bajo carga baja con streaming inmediato (estrés de commits REST)
-      {
-          "sink": "iceberg",
-          "k": k_factors[0],
-          "buf": buffer_profiles[0][0],
-          "flush": buffer_profiles[0][1],
-      },
-      # Tratamiento 4: Iceberg bajo máxima carga con microbatching estándar
-      {
-          "sink": "iceberg",
-          "k": k_factors[2],
-          "buf": buffer_profiles[2][0],
-          "flush": buffer_profiles[2][1],
-      },
-  ]
+    # Definición explícita de los tratamientos de validación aislados para Iceberg
+    validation_specs = [
+        # Tratamiento 1: Iceberg en streaming puro (Estrés de red y commits REST)
+        # Equivalente a la primera falla: iceberg_k1_b1_t0
+        {
+            "sink": "iceberg",
+            "k": k_factors[0],             # K = 1
+            "buf": buffer_profiles[0][0],  # Buffer = 1
+            "flush": buffer_profiles[0][1],# Flush = 0.0s
+        },
+        # Tratamiento 2: Iceberg bajo máxima carga con buffer gigante (Estrés de memoria)
+        # Equivalente a la última falla: iceberg_k100_b1000000_t5
+        {
+            "sink": "iceberg",
+            "k": k_factors[5],             # K = 100
+            "buf": buffer_profiles[4][0],  # Buffer = 1,000,000
+            "flush": buffer_profiles[4][1],# Flush = 5.0s
+        },
+    ]
 
-  matrix: List[TreatmentConfig] = []
+    matrix: List[TreatmentConfig] = []
 
-  for spec in validation_specs:
-    sink: SinkType = spec["sink"]
-    treatment = TreatmentConfig(
-        k_factor=spec["k"],
-        buffer_size=spec["buf"],
-        flush_interval_sec=spec["flush"],
-        sim_steps=sim_steps,
-        replica_id=1,
-        namespace="zacatenco",
-        table_trolebuses="telemetria_trolebuses",
-        table_estaciones="telemetria_estaciones",
-        sink_type=sink,
-        tag="first_run",
-    )
-    matrix.append(treatment)
+    for spec in validation_specs:
+        sink = spec["sink"]
+        treatment = TreatmentConfig(
+            k_factor=spec["k"],
+            buffer_size=spec["buf"],
+            flush_interval_sec=spec["flush"],
+            sim_steps=sim_steps,
+            replica_id=1,
+            namespace="zacatenco",
+            table_trolebuses="telemetria_trolebuses",
+            table_estaciones="telemetria_estaciones",
+            sink_type=sink,
+            tag="iceberg_isolation_test", # Tag representativo de la prueba de diagnóstico
+        )
+        matrix.append(treatment)
 
-  return matrix
+    return matrix

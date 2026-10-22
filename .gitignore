@@ -13,11 +13,17 @@ results/*.json
 results/*.csv
 results/*.parquet
 !results/.gitkeep
-ablation_study/results/*
+ablation_study/processed/
+ablation_study/figures/
+ablation_study/logs/
+ablation_study/plotting/first_run_alone/
+ablation_study/plotting/ablation_plots_v2.py
+ablation_study/plotting/ablation_plots_v3.py
 
 # Logs y trazas de depuración
 *.log
 .pytest_cache/
+kpis.json
 
 # DuckDB / SQLite temporales
 *.duckdb
